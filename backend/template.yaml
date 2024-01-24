@@ -1,0 +1,139 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  logo-maker
+
+  SAM Template for backend
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 128
+
+Resources:
+
+  # Bucket to store images
+  LogoBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-logos
+
+  LogoMakerApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      GatewayResponses:
+        DEFAULT_4XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Headers: "'*'"
+          ResponseTemplates:
+            application/json: '{"message":$context.error.messageString}'
+        DEFAULT_5XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Headers: "'*'"
+          ResponseTemplates:
+            application/json: '{"message":$context.error.messageString}'
+
+  LogoMakerOriginaccessidentity:
+      Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+      Properties:
+        CloudFrontOriginAccessIdentityConfig:
+          Comment: "logo-maker-originaccessidentity"
+
+  LogoMakerBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        AccessControl: Private
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: false
+          BlockPublicPolicy: false
+          IgnorePublicAcls: false
+          RestrictPublicBuckets: false
+        BucketEncryption:         
+            ServerSideEncryptionConfiguration: 
+            - ServerSideEncryptionByDefault:                                 
+                SSEAlgorithm: AES256
+
+  LogoMakerBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties: 
+      Bucket: !Ref LogoMakerBucket
+      PolicyDocument:
+        Statement:
+          -
+            Action:
+              - "s3:GetObject"
+            Effect: "Allow"
+            Resource: 
+              Fn::Join: 
+                - ""
+                - 
+                  - "arn:aws:s3:::"
+                  - 
+                    Ref: ElasticStreamsBucket
+                  - "/*"
+            Principal:
+              CanonicalUser: !GetAtt LogoMakerOriginaccessidentity.S3CanonicalUserId
+
+  LogoMakerDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub logo-maker-distribution
+        DefaultRootObject: index.html
+        ViewerCertificate: 
+          AcmCertificateArn: !Ref GlobalACMCert
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+        
+        Origins:
+        - Id: LogoMakerBucket
+          DomainName: !Sub ${LogoMakerBucket}.s3.${AWS::Region}.amazonaws.com      
+          S3OriginConfig:
+            OriginAccessIdentity: !Join [ "", [ "origin-access-identity/cloudfront/", !Ref LogoMakerOriginaccessidentity ] ]
+                                
+        DefaultCacheBehavior:                    
+          TargetOriginId: LogoMakerBucket
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: false
+          CachePolicyId: "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+          ResponseHeadersPolicyId: "5cc3b908-e619-4b99-88e5-2cf7f45965bd"
+          OriginRequestPolicyId: "88a5eaf4-2fd4-4709-b370-b4c650ea3fcf"
+
+  GenLogoImageFunction:
+    Type: AWS::Serverless::Function 
+    Properties:
+      Policies: 
+        - S3WritePolicy:
+            BucketName: !Ref LogoBucket
+        - arn:aws:iam::aws:policy/AmazonBedrockFullAccess
+      CodeUri: gen-logo-image/
+      Handler: app.lambda_handler
+      Runtime: python3.11
+      Architectures:
+        - arm64
+      Layers: 
+        - arn:aws:lambda:us-west-2:168420111683:layer:bedrock-layer:1
+      Environment:
+        Variables:
+          LOGO_BUCKET: !Ref LogoBucket
+      Events:
+        GenLogoImage:
+          Type: Api 
+          Properties:
+            RestApiId: !Ref LogoMakerApi
+            Path: /gen-logo-image
+            Method: POST
+
+Outputs:
+  GenLogoImageFunction:
+    Description: "GenLogoImage Lambda Function ARN"
+    Value: !GetAtt GenLogoImageFunction.Arn
+  GenLogoImageFunctionIamRole:
+    Description: "Implicit IAM Role created for GenLogoImage function"
+    Value: !GetAtt GenLogoImageFunctionRole.Arn

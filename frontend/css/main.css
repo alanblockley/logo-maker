@@ -1,0 +1,18 @@
+#main {
+    width: 100%;
+    height: 100vh;
+    background: url("/img/logo-maker-6.png") top center;
+    background-size: cover;
+    position: relative;
+}
+
+#maindiv {
+    background-color: rgba(255, 255, 255, 0.7);
+    border-color: black;
+    border-radius: 32px;
+}
+
+#mainrow {
+    background-color: white;
+    border-radius: 16px;
+}
